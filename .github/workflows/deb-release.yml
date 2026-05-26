@@ -178,25 +178,22 @@ jobs:
           mkdir -p $PKG_ROOT/DEBIAN
             
           # Control file (version without 'v' prefix for debian convention)
-          # Using <<-'EOF' to prevent shell expansion so YAML parses correctly,
-          # the env var will be expanded when the script runs
-          cat > $PKG_ROOT/DEBIAN/control <<-'OUTER_EOF'
-Package: ghostty
-Version: VERSION_PLACEHOLDER
-Section: utils
-Priority: optional
-Architecture: amd64
-Maintainer: Leon03 <cola03@qq.com>
-Description: A fast, feature-rich, and cross-platform terminal emulator
- Ghostty is a terminal emulator that differentiates itself by being fast,
- feature-rich, and native. While there are many excellent terminal
- emulators available, they all force you to choose between speed,
- features, or native UIs. Ghostty provides all three.
-Homepage: https://ghostty.org
-Depends: libc6, libglib2.0-0, libgtk-4-1, libpango-1.0-0, libcairo2, libx11-6, libxkbcommon0, libadwaita-1-0, libfreetype6, zlib1g
-OUTER_EOF
-          # Replace placeholder with actual version
-          sed -i 's/VERSION_PLACEHOLDER/'"${GHOSTTY_VERSION_STRIPPED}"'/' $PKG_ROOT/DEBIAN/control
+          # Use printf to avoid heredoc/YAML block scalar conflicts
+          printf '%s\n' \
+            "Package: ghostty" \
+            "Version: ${GHOSTTY_VERSION_STRIPPED}" \
+            "Section: utils" \
+            "Priority: optional" \
+            "Architecture: amd64" \
+            "Maintainer: Leon03 <cola03@qq.com>" \
+            "Description: A fast, feature-rich, and cross-platform terminal emulator" \
+            " Ghostty is a terminal emulator that differentiates itself by being fast," \
+            " feature-rich, and native. While there are many excellent terminal" \
+            " emulators available, they all force you to choose between speed," \
+            " features, or native UIs. Ghostty provides all three." \
+            "Homepage: https://ghostty.org" \
+            "Depends: libc6, libglib2.0-0, libgtk-4-1, libpango-1.0-0, libcairo2, libx11-6, libxkbcommon0, libadwaita-1-0, libfreetype6, zlib1g" \
+            > "$PKG_ROOT/DEBIAN/control"
             
           # Pre-install script
           cat > $PKG_ROOT/DEBIAN/preinst << 'PRSCRIPT'
