@@ -1,0 +1,280 @@
+name: Release Deb Package
+
+on:
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to build (e.g. 1.0.0, without v prefix)"
+        required: false
+        type: string
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-deb:
+    runs-on: ubuntu-latest
+    container: debian:bookworm
+    env:
+      DEBIAN_FRONTEND: noninteractive
+      ZIG_VERSION: "0.15.2"
+    steps:
+      - name: Determine version
+        id: version
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" && -n "${{ inputs.version }}" ]]; then
+            VERSION=${{ inputs.version }}
+          else
+            VERSION=${GITHUB_REF#refs/tags/v}
+          fi
+          # Add 'v' prefix if not present (for source URL)
+          if [[ ! "$VERSION" =~ ^v ]]; then
+            SOURCE_URL="https://release.files.ghostty.org/v${VERSION}/ghostty-v${VERSION}.tar.gz"
+          else
+            SOURCE_URL="https://release.files.ghostty.org/${VERSION}/ghostty-${VERSION}.tar.gz"
+          fi
+          echo "VERSION=$VERSION"
+          echo "source_url=$SOURCE_URL"
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "source_url=$SOURCE_URL" >> $GITHUB_OUTPUT
+
+      - name: Install system dependencies
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            build-essential \
+            curl \
+            desktop-file-utils \
+            pkg-config \
+            libcairo2-dev \
+            libglib2.0-dev \
+            libgtk-4-dev \
+            libpango1.0-dev \
+            libx11-dev \
+            libxkbcommon-dev \
+            libadwaita-1-dev \
+            libfreetype-dev \
+            libfontconfig-dev \
+            zlib1g-dev \
+            libpng-dev \
+            libxml2-dev \
+            libharfbuzz-dev \
+            dbus \
+            unzip \
+            xz-utils
+
+      - name: Install Zig
+        run: |
+          curl -L "https://ziglang.org/download/${ZIG_VERSION}/zig-linux-x86_64-${ZIG_VERSION}.tar.xz" | tar xJ -C /opt
+          ln -sf /opt/zig-linux-x86_64-${ZIG_VERSION}/zig /usr/local/bin/zig
+          zig version
+
+      - name: Download source tarball
+        run: |
+          curl -L -o ghostty.tar.gz "${{ steps.version.outputs.source_url }}"
+          echo "=== Tarball contents ==="
+          tar tzf ghostty.tar.gz | head -5
+
+      - name: Extract source
+        run: |
+          mkdir -p ghostty-src
+          tar -xzf ghostty.tar.gz -C ghostty-src --strip-components=1
+          ls ghostty-src/
+
+      - name: Build ghostty
+        env:
+          GHOSTTY_VERSION: ${{ steps.version.outputs.version }}
+          ZIG_LOCAL_CACHE_DIR: /tmp/zig-cache
+          ZIG_GLOBAL_CACHE_DIR: /tmp/zig-global-cache
+        working-directory: ghostty-src
+        run: |
+          DESTDIR=/tmp/ghostty-install \
+            zig build \
+            --prefix /usr \
+            --system /tmp/zig-cache \
+            -Doptimize=ReleaseFast \
+            -Dcpu=baseline \
+            -Dversion-string=${GHOSTTY_VERSION}
+
+          echo "=== Built artifacts ==="
+          find /tmp/ghostty-install -type f -name "ghostty" 2>/dev/null
+          ls -la /tmp/ghostty-install/usr/bin/ 2>/dev/null || true
+
+      - name: Prepare Debian package structure
+        run: |
+          PKG_ROOT=/tmp/deb-pkg
+          rm -rf $PKG_ROOT
+          mkdir -p $PKG_ROOT
+            
+          # Copy installed files from DESTDIR
+          cp -a /tmp/ghostty-install/* $PKG_ROOT/
+            
+          # Create required directories
+          mkdir -p $PKG_ROOT/usr/share/applications
+          mkdir -p $PKG_ROOT/usr/share/metainfo
+          mkdir -p $PKG_ROOT/usr/share/icons/hicolor/{16x16,22x22,24x24,32x32,48x48,64x64,128x128,256x256,512x512}/apps
+          mkdir -p $PKG_ROOT/usr/share/doc/ghostty
+          mkdir -p $PKG_ROOT/usr/lib/systemd/user
+          mkdir -p $PKG_ROOT/usr/share/ghostty/{shell-integration,terminfo,themes,fonts}
+            
+          # Process and install desktop file
+          sed -e 's/@NAME@/Ghostty/g' \
+              -e 's/@GHOSTTY@/ghostty/g' \
+              -e 's/@APPID@/com.mitchellh.ghostty/g' \
+              ghostty-src/dist/linux/app.desktop.in \
+              > $PKG_ROOT/usr/share/applications/com.mitchellh.ghostty.desktop
+            
+          # Process and install metainfo
+          sed -e 's/@NAME@/Ghostty/g' \
+              -e 's/@APPID@/com.mitchellh.ghostty/g' \
+              ghostty-src/dist/linux/com.mitchellh.ghostty.metainfo.xml.in \
+              > $PKG_ROOT/usr/share/metainfo/com.mitchellh.ghostty.metainfo.xml
+            
+          # Process and install systemd service
+          sed -e 's/@NAME@/Ghostty/g' \
+              -e 's/@GHOSTTY@/ghostty/g' \
+              -e 's/@APPID@/com.mitchellh.ghostty/g' \
+              ghostty-src/dist/linux/systemd.service.in \
+              > $PKG_ROOT/usr/lib/systemd/user/ghostty.service
+            
+          # Copy shell integration
+          cp -r ghostty-src/shell-integration/* $PKG_ROOT/usr/share/ghostty/shell-integration/ 2>/dev/null || true
+            
+          # Copy terminfo
+          cp -r ghostty-src/terminfo/* $PKG_ROOT/usr/share/ghostty/terminfo/ 2>/dev/null || true
+            
+          # Copy themes
+          cp -r ghostty-src/themes/* $PKG_ROOT/usr/share/ghostty/themes/ 2>/dev/null || true
+            
+          # Copy fonts if available
+          cp -r ghostty-src/fonts/* $PKG_ROOT/usr/share/ghostty/fonts/ 2>/dev/null || true
+            
+          # Install icon - find from zig-out or create placeholder
+          ICON_SRC=$(find /tmp/ghostty-install -name "com.mitchellh.ghostty.png" 2>/dev/null | head -1)
+          if [ -n "$ICON_SRC" ]; then
+            cp "$ICON_SRC" $PKG_ROOT/usr/share/icons/hicolor/256x256/apps/com.mitchellh.ghostty.png
+            # Also copy to other sizes as symlinks won't work in deb
+            for size in 16x16 22x22 24x24 32x32 48x48 64x64 128x128 512x512; do
+              cp "$ICON_SRC" $PKG_ROOT/usr/share/icons/hicolor/$size/apps/com.mitchellh.ghostty.png 2>/dev/null || true
+            done
+            echo "Icon installed from: $ICON_SRC"
+          else
+            echo "Warning: No icon found, skipping icon installation"
+          fi
+            
+          echo "=== Package structure ==="
+          ls $PKG_ROOT/usr/share/applications/
+          ls $PKG_ROOT/usr/share/icons/hicolor/256x256/apps/ 2>/dev/null || echo "No 256 icon"
+          find $PKG_ROOT/usr/share/ghostty -type f | head -20
+
+      - name: Create DEBIAN control and scripts
+        env:
+          GHOSTTY_VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          PKG_ROOT=/tmp/deb-pkg
+          mkdir -p $PKG_ROOT/DEBIAN
+            
+          # Control file
+          cat > $PKG_ROOT/DEBIAN/control << 'EOF'
+Package: ghostty
+Version: VERSION_PLACEHOLDER
+Section: utils
+Priority: optional
+Architecture: amd64
+Maintainer: Leon03 <cola03@qq.com>
+Description: A fast, feature-rich, and cross-platform terminal emulator
+ Ghostty is a terminal emulator that differentiates itself by being fast,
+ feature-rich, and native. While there are many excellent terminal
+ emulators available, they all force you to choose between speed,
+ features, or native UIs. Ghostty provides all three.
+Homepage: https://ghostty.org
+Depends: libc6, libglib2.0-0, libgtk-4-1, libpango-1.0-0, libcairo2, libx11-6, libxkbcommon0, libadwaita-1-0, libfreetype6, zlib1g
+EOF
+
+          sed -i "s/VERSION_PLACEHOLDER/$GHOSTTY_VERSION/" $PKG_ROOT/DEBIAN/control
+            
+          # Pre-install script
+          cat > $PKG_ROOT/DEBIAN/preinst << 'PRSCRIPT'
+#!/bin/sh
+exit 0
+PRSCRIPT
+          chmod 755 $PKG_ROOT/DEBIAN/preinst
+            
+          # Post-install script
+          cat > $PKG_ROOT/DEBIAN/postinst << 'POSSCRIPT'
+#!/bin/sh
+if command -v gtk-update-icon-cache >/dev/null 2>&1; then
+    gtk-update-icon-cache -f -t /usr/share/icons/hicolor 2>/dev/null || true
+fi
+if command -v update-desktop-database >/dev/null 2>&1; then
+    update-desktop-database /usr/share/applications 2>/dev/null || true
+fi
+exit 0
+POSSCRIPT
+          chmod 755 $PKG_ROOT/DEBIAN/postinst
+            
+          # Pre-removal script
+          cat > $PKG_ROOT/DEBIAN/prerm << 'PRSCRIPT'
+#!/bin/sh
+exit 0
+PRSCRIPT
+          chmod 755 $PKG_ROOT/DEBIAN/prerm
+            
+          # Post-removal script
+          cat > $PKG_ROOT/DEBIAN/postrm << 'PRSCRIPT'
+#!/bin/sh
+if [ "$1" = "remove" ] || [ "$1" = "purge" ]; then
+    if command -v gtk-update-icon-cache >/dev/null 2>&1; then
+        gtk-update-icon-cache -f -t /usr/share/icons/hicolor 2>/dev/null || true
+    fi
+    if command -v update-desktop-database >/dev/null 2>&1; then
+        update-desktop-database /usr/share/applications 2>/dev/null || true
+    fi
+fi
+exit 0
+PRSCRIPT
+          chmod 755 $PKG_ROOT/DEBIAN/postrm
+            
+          echo "DEBIAN files created"
+          cat $PKG_ROOT/DEBIAN/control
+
+      - name: Build .deb package
+        env:
+          GHOSTTY_VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          cd /tmp
+          dpkg-deb --build deb-pkg ghostty_${GHOSTTY_VERSION}_amd64.deb
+          ls -la ghostty_${GHOSTTY_VERSION}_amd64.deb
+          
+          echo "=== Package contents (first 50 files) ==="
+          dpkg-deb --contents ghostty_${GHOSTTY_VERSION}_amd64.deb | head -50
+
+      - name: Verify package
+        env:
+          GHOSTTY_VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          echo "=== Package info ==="
+          dpkg-deb --info /tmp/ghostty_${GHOSTTY_VERSION}_amd64.deb
+          echo ""
+          echo "=== Package size ==="
+          du -h /tmp/ghostty_${GHOSTTY_VERSION}_amd64.deb
+
+      - name: Upload .deb as release asset
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/v')
+        with:
+          files: |
+            /tmp/ghostty_*.deb
+          generate_release_notes: false
+          draft: false
+
+      - name: Upload .deb as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ghostty-deb-${{ steps.version.outputs.version }}
+          path: /tmp/ghostty_*.deb
+          retention-days: 30
