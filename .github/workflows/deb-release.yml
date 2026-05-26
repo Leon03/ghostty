@@ -47,6 +47,8 @@ jobs:
           apt-get install -y --no-install-recommends \
             build-essential \
             curl \
+            ca-certificates \
+            xz-utils \
             desktop-file-utils \
             pkg-config \
             libcairo2-dev \
@@ -68,7 +70,9 @@ jobs:
 
       - name: Install Zig
         run: |
-          curl -L "https://ziglang.org/download/${ZIG_VERSION}/zig-linux-x86_64-${ZIG_VERSION}.tar.xz" | tar xJ -C /opt
+          # Download Zig compiler (insecure due to potential SSL issues in container)
+          curl -L --insecure -o /tmp/zig.tar.xz "https://ziglang.org/download/${ZIG_VERSION}/zig-linux-x86_64-${ZIG_VERSION}.tar.xz"
+          tar xJf /tmp/zig.tar.xz -C /opt
           ln -sf /opt/zig-linux-x86_64-${ZIG_VERSION}/zig /usr/local/bin/zig
           zig version
 
