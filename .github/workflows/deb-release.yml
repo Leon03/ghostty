@@ -195,47 +195,21 @@ jobs:
             "Depends: libc6, libglib2.0-0, libgtk-4-1, libpango-1.0-0, libcairo2, libx11-6, libxkbcommon0, libadwaita-1-0, libfreetype6, zlib1g" \
             > "$PKG_ROOT/DEBIAN/control"
             
-          # Pre-install script
-          cat > $PKG_ROOT/DEBIAN/preinst << 'PRSCRIPT'
-#!/bin/sh
-exit 0
-PRSCRIPT
-          chmod 755 $PKG_ROOT/DEBIAN/preinst
+          # Pre-install script (using printf to avoid heredoc/YAML conflicts)
+          printf '#!/bin/sh\n exit 0\n' > "$PKG_ROOT/DEBIAN/preinst"
+          chmod 755 "$PKG_ROOT/DEBIAN/preinst"
             
           # Post-install script
-          cat > $PKG_ROOT/DEBIAN/postinst << 'POSSCRIPT'
-#!/bin/sh
-if command -v gtk-update-icon-cache >/dev/null 2>&1; then
-    gtk-update-icon-cache -f -t /usr/share/icons/hicolor 2>/dev/null || true
-fi
-if command -v update-desktop-database >/dev/null 2>&1; then
-    update-desktop-database /usr/share/applications 2>/dev/null || true
-fi
-exit 0
-POSSCRIPT
-          chmod 755 $PKG_ROOT/DEBIAN/postinst
+          printf '#!/bin/sh\n if command -v gtk-update-icon-cache >/dev/null 2>&1; then\n     gtk-update-icon-cache -f -t /usr/share/icons/hicolor 2>/dev/null || true\n fi\n if command -v update-desktop-database >/dev/null 2>&1; then\n     update-desktop-database /usr/share/applications 2>/dev/null || true\n fi\n exit 0\n' > "$PKG_ROOT/DEBIAN/postinst"
+          chmod 755 "$PKG_ROOT/DEBIAN/postinst"
             
           # Pre-removal script
-          cat > $PKG_ROOT/DEBIAN/prerm << 'PRSCRIPT'
-#!/bin/sh
-exit 0
-PRSCRIPT
-          chmod 755 $PKG_ROOT/DEBIAN/prerm
+          printf '#!/bin/sh\n exit 0\n' > "$PKG_ROOT/DEBIAN/prerm"
+          chmod 755 "$PKG_ROOT/DEBIAN/prerm"
             
           # Post-removal script
-          cat > $PKG_ROOT/DEBIAN/postrm << 'PRSCRIPT'
-#!/bin/sh
-if [ "$1" = "remove" ] || [ "$1" = "purge" ]; then
-    if command -v gtk-update-icon-cache >/dev/null 2>&1; then
-        gtk-update-icon-cache -f -t /usr/share/icons/hicolor 2>/dev/null || true
-    fi
-    if command -v update-desktop-database >/dev/null 2>&1; then
-        update-desktop-database /usr/share/applications 2>/dev/null || true
-    fi
-fi
-exit 0
-PRSCRIPT
-          chmod 755 $PKG_ROOT/DEBIAN/postrm
+          printf '#!/bin/sh\n if [ "$1" = "remove" ] || [ "$1" = "purge" ]; then\n     if command -v gtk-update-icon-cache >/dev/null 2>&1; then\n         gtk-update-icon-cache -f -t /usr/share/icons/hicolor 2>/dev/null || true\n     fi\n     if command -v update-desktop-database >/dev/null 2>&1; then\n         update-desktop-database /usr/share/applications 2>/dev/null || true\n     fi\n fi\n exit 0\n' > "$PKG_ROOT/DEBIAN/postrm"
+          chmod 755 "$PKG_ROOT/DEBIAN/postrm"
             
           echo "DEBIAN files created"
           cat $PKG_ROOT/DEBIAN/control
