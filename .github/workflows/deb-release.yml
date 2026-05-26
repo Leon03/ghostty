@@ -31,9 +31,17 @@ jobs:
           else
             VERSION=${GITHUB_REF#refs/tags/v}
           fi
-          # Strip 'v' prefix if present (source URL format uses no prefix)
+          # Strip 'v' prefix if present
           VERSION_STRIPPED=${VERSION#v}
-          SOURCE_URL="https://release.files.ghostty.org/${VERSION_STRIPPED}/ghostty-${VERSION_STRIPPED}.tar.gz"
+          
+          # For workflow_dispatch on forks, use current repo's main branch archive
+          # since upstream release files may not exist for this fork's version
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            SOURCE_URL="https://github.com/${GITHUB_REPOSITORY}/archive/refs/heads/main.tar.gz"
+          else
+            SOURCE_URL="https://release.files.ghostty.org/${VERSION_STRIPPED}/ghostty-${VERSION_STRIPPED}.tar.gz"
+          fi
+          
           echo "VERSION=$VERSION"
           echo "VERSION_STRIPPED=$VERSION_STRIPPED"
           echo "source_url=$SOURCE_URL"
@@ -78,7 +86,7 @@ jobs:
 
       - name: Download source tarball
         run: |
-          curl -L -o ghostty.tar.gz "${{ steps.version.outputs.source_url }}"
+          curl -L --insecure -o ghostty.tar.gz "${{ steps.version.outputs.source_url }}"
           echo "=== Tarball contents ==="
           tar tzf ghostty.tar.gz | head -5
 
