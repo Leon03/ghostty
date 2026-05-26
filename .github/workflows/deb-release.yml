@@ -23,31 +23,23 @@ jobs:
       DEBIAN_FRONTEND: noninteractive
       ZIG_VERSION: "0.15.2"
     steps:
+      # Checkout source BEFORE entering container for reliable access
+      - name: Checkout source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+        with:
+          fetch-depth: 1
+
       - name: Determine version
         id: version
         run: |
           if [[ "${{ github.event_name }}" == "workflow_dispatch" && -n "${{ inputs.version }}" ]]; then
-            VERSION=${{ inputs.version }}
+            VERSION="${{ inputs.version }}"
           else
-            VERSION=${GITHUB_REF#refs/tags/v}
+            VERSION="${GITHUB_REF#refs/tags/v}"
           fi
-          # Strip 'v' prefix if present
-          VERSION_STRIPPED=${VERSION#v}
-          
-          # For workflow_dispatch on forks, use current repo's main branch archive
-          # since upstream release files may not exist for this fork's version
-          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
-            SOURCE_URL="https://github.com/${GITHUB_REPOSITORY}/archive/refs/heads/main.tar.gz"
-          else
-            SOURCE_URL="https://release.files.ghostty.org/${VERSION_STRIPPED}/ghostty-${VERSION_STRIPPED}.tar.gz"
-          fi
-          
-          echo "VERSION=$VERSION"
-          echo "VERSION_STRIPPED=$VERSION_STRIPPED"
-          echo "source_url=$SOURCE_URL"
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
-          echo "version_stripped=$VERSION_STRIPPED" >> $GITHUB_OUTPUT
-          echo "source_url=$SOURCE_URL" >> $GITHUB_OUTPUT
+          VERSION_STRIPPED="${VERSION#v}"
+          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+          echo "VERSION_STRIPPED=$VERSION_STRIPPED" >> $GITHUB_OUTPUT
 
       - name: Install system dependencies
         run: |
@@ -73,35 +65,21 @@ jobs:
             libxml2-dev \
             libharfbuzz-dev \
             dbus \
-            unzip \
-            xz-utils
+            unzip
 
       - name: Install Zig
         run: |
-          # Download Zig compiler pre-built binary (URL format changed in 0.15+)
           curl -L --insecure -o /tmp/zig.tar.xz "https://ziglang.org/download/${ZIG_VERSION}/zig-x86_64-linux-${ZIG_VERSION}.tar.xz"
           tar xJf /tmp/zig.tar.xz -C /opt
           ln -sf /opt/zig-x86_64-linux-${ZIG_VERSION}/zig /usr/local/bin/zig
           zig version
 
-      - name: Download source tarball
-        run: |
-          curl -L --insecure -o ghostty.tar.gz "${{ steps.version.outputs.source_url }}"
-          echo "=== Tarball contents ==="
-          tar tzf ghostty.tar.gz | head -5
-
-      - name: Extract source
-        run: |
-          mkdir -p ghostty-src
-          tar -xzf ghostty.tar.gz -C ghostty-src --strip-components=1
-          ls ghostty-src/
-
       - name: Build ghostty
         env:
           GHOSTTY_VERSION: ${{ steps.version.outputs.version }}
+          GHOSTTY_VERSION_STRIPPED: ${{ steps.version.outputs.version_stripped }}
           ZIG_LOCAL_CACHE_DIR: /tmp/zig-cache
           ZIG_GLOBAL_CACHE_DIR: /tmp/zig-global-cache
-        working-directory: ghostty-src
         run: |
           DESTDIR=/tmp/ghostty-install \
             zig build \
@@ -109,7 +87,7 @@ jobs:
             --system /tmp/zig-cache \
             -Doptimize=ReleaseFast \
             -Dcpu=baseline \
-            -Dversion-string=${GHOSTTY_VERSION}
+            -Dversion-string=${GHOSTTY_VERSION_STRIPPED}
 
           echo "=== Built artifacts ==="
           find /tmp/ghostty-install -type f -name "ghostty" 2>/dev/null
@@ -120,10 +98,10 @@ jobs:
           PKG_ROOT=/tmp/deb-pkg
           rm -rf $PKG_ROOT
           mkdir -p $PKG_ROOT
-            
+
           # Copy installed files from DESTDIR
           cp -a /tmp/ghostty-install/* $PKG_ROOT/
-            
+
           # Create required directories
           mkdir -p $PKG_ROOT/usr/share/applications
           mkdir -p $PKG_ROOT/usr/share/metainfo
@@ -131,44 +109,43 @@ jobs:
           mkdir -p $PKG_ROOT/usr/share/doc/ghostty
           mkdir -p $PKG_ROOT/usr/lib/systemd/user
           mkdir -p $PKG_ROOT/usr/share/ghostty/{shell-integration,terminfo,themes,fonts}
-            
+
           # Process and install desktop file
           sed -e 's/@NAME@/Ghostty/g' \
               -e 's/@GHOSTTY@/ghostty/g' \
               -e 's/@APPID@/com.mitchellh.ghostty/g' \
-              ghostty-src/dist/linux/app.desktop.in \
+              dist/linux/app.desktop.in \
               > $PKG_ROOT/usr/share/applications/com.mitchellh.ghostty.desktop
-            
+
           # Process and install metainfo
           sed -e 's/@NAME@/Ghostty/g' \
               -e 's/@APPID@/com.mitchellh.ghostty/g' \
-              ghostty-src/dist/linux/com.mitchellh.ghostty.metainfo.xml.in \
+              dist/linux/com.mitchellh.ghostty.metainfo.xml.in \
               > $PKG_ROOT/usr/share/metainfo/com.mitchellh.ghostty.metainfo.xml
-            
+
           # Process and install systemd service
           sed -e 's/@NAME@/Ghostty/g' \
               -e 's/@GHOSTTY@/ghostty/g' \
               -e 's/@APPID@/com.mitchellh.ghostty/g' \
-              ghostty-src/dist/linux/systemd.service.in \
+              dist/linux/systemd.service.in \
               > $PKG_ROOT/usr/lib/systemd/user/ghostty.service
-            
+
           # Copy shell integration
-          cp -r ghostty-src/shell-integration/* $PKG_ROOT/usr/share/ghostty/shell-integration/ 2>/dev/null || true
-            
+          cp -r shell-integration/* $PKG_ROOT/usr/share/ghostty/shell-integration/ 2>/dev/null || true
+
           # Copy terminfo
-          cp -r ghostty-src/terminfo/* $PKG_ROOT/usr/share/ghostty/terminfo/ 2>/dev/null || true
-            
+          cp -r terminfo/* $PKG_ROOT/usr/share/ghostty/terminfo/ 2>/dev/null || true
+
           # Copy themes
-          cp -r ghostty-src/themes/* $PKG_ROOT/usr/share/ghostty/themes/ 2>/dev/null || true
-            
+          cp -r themes/* $PKG_ROOT/usr/share/ghostty/themes/ 2>/dev/null || true
+
           # Copy fonts if available
-          cp -r ghostty-src/fonts/* $PKG_ROOT/usr/share/ghostty/fonts/ 2>/dev/null || true
-            
+          cp -r fonts/* $PKG_ROOT/usr/share/ghostty/fonts/ 2>/dev/null || true
+
           # Install icon - find from zig-out or create placeholder
           ICON_SRC=$(find /tmp/ghostty-install -name "com.mitchellh.ghostty.png" 2>/dev/null | head -1)
           if [ -n "$ICON_SRC" ]; then
             cp "$ICON_SRC" $PKG_ROOT/usr/share/icons/hicolor/256x256/apps/com.mitchellh.ghostty.png
-            # Also copy to other sizes as symlinks won't work in deb
             for size in 16x16 22x22 24x24 32x32 48x48 64x64 128x128 512x512; do
               cp "$ICON_SRC" $PKG_ROOT/usr/share/icons/hicolor/$size/apps/com.mitchellh.ghostty.png 2>/dev/null || true
             done
@@ -176,7 +153,7 @@ jobs:
           else
             echo "Warning: No icon found, skipping icon installation"
           fi
-            
+
           echo "=== Package structure ==="
           ls $PKG_ROOT/usr/share/applications/
           ls $PKG_ROOT/usr/share/icons/hicolor/256x256/apps/ 2>/dev/null || echo "No 256 icon"
@@ -188,9 +165,8 @@ jobs:
         run: |
           PKG_ROOT=/tmp/deb-pkg
           mkdir -p $PKG_ROOT/DEBIAN
-            
-          # Control file (version without 'v' prefix for debian convention)
-          # Use printf to avoid heredoc/YAML block scalar conflicts
+
+          # Control file
           printf '%s\n' \
             "Package: ghostty" \
             "Version: ${GHOSTTY_VERSION_STRIPPED}" \
@@ -206,37 +182,35 @@ jobs:
             "Homepage: https://ghostty.org" \
             "Depends: libc6, libglib2.0-0, libgtk-4-1, libpango-1.0-0, libcairo2, libx11-6, libxkbcommon0, libadwaita-1-0, libfreetype6, zlib1g" \
             > "$PKG_ROOT/DEBIAN/control"
-            
-          # Pre-install script (using printf to avoid heredoc/YAML conflicts)
+
+          # Pre-install script
           printf '#!/bin/sh\n exit 0\n' > "$PKG_ROOT/DEBIAN/preinst"
           chmod 755 "$PKG_ROOT/DEBIAN/preinst"
-            
+
           # Post-install script
-          printf '#!/bin/sh\n if command -v gtk-update-icon-cache >/dev/null 2>&1; then\n     gtk-update-icon-cache -f -t /usr/share/icons/hicolor 2>/dev/null || true\n fi\n if command -v update-desktop-database >/dev/null 2>&1; then\n     update-desktop-database /usr/share/applications 2>/dev/null || true\n fi\n exit 0\n' > "$PKG_ROOT/DEBIAN/postinst"
+          printf '#!/bin/sh\n if command -v gtk-update-icon-cache >/dev/null 2>&1; then gtk-update-icon-cache -f -t /usr/share/icons/hicolor 2>/dev/null || true; fi; if command -v update-desktop-database >/dev/null 2>&1; then update-desktop-database /usr/share/applications 2>/dev/null || true; fi; exit 0\n' > "$PKG_ROOT/DEBIAN/postinst"
           chmod 755 "$PKG_ROOT/DEBIAN/postinst"
-            
+
           # Pre-removal script
           printf '#!/bin/sh\n exit 0\n' > "$PKG_ROOT/DEBIAN/prerm"
           chmod 755 "$PKG_ROOT/DEBIAN/prerm"
-            
+
           # Post-removal script
-          printf '#!/bin/sh\n if [ "$1" = "remove" ] || [ "$1" = "purge" ]; then\n     if command -v gtk-update-icon-cache >/dev/null 2>&1; then\n         gtk-update-icon-cache -f -t /usr/share/icons/hicolor 2>/dev/null || true\n     fi\n     if command -v update-desktop-database >/dev/null 2>&1; then\n         update-desktop-database /usr/share/applications 2>/dev/null || true\n     fi\n fi\n exit 0\n' > "$PKG_ROOT/DEBIAN/postrm"
+          printf '#!/bin/sh\n if [ "$1" = "remove" ] || [ "$1" = "purge" ]; then if command -v gtk-update-icon-cache >/dev/null 2>&1; then gtk-update-icon-cache -f -t /usr/share/icons/hicolor 2>/dev/null || true; fi; if command -v update-desktop-database >/dev/null 2>&1; then update-desktop-database /usr/share/applications 2>/dev/null || true; fi; fi; exit 0\n' > "$PKG_ROOT/DEBIAN/postrm"
           chmod 755 "$PKG_ROOT/DEBIAN/postrm"
-            
+
           echo "DEBIAN files created"
           cat $PKG_ROOT/DEBIAN/control
 
       - name: Build .deb package
         env:
-          GHOSTTY_VERSION: ${{ steps.version.outputs.version }}
           GHOSTTY_VERSION_STRIPPED: ${{ steps.version.outputs.version_stripped }}
         run: |
           cd /tmp
           dpkg-deb --build deb-pkg ghostty_${GHOSTTY_VERSION_STRIPPED}_amd64.deb
-          # Copy to workspace root for release action access
           cp ghostty_${GHOSTTY_VERSION_STRIPPED}_amd64.deb $GITHUB_WORKSPACE/
           ls -la $GITHUB_WORKSPACE/ghostty_${GHOSTTY_VERSION_STRIPPED}_amd64.deb
-          
+
           echo "=== Package contents (first 50 files) ==="
           dpkg-deb --contents ghostty_${GHOSTTY_VERSION_STRIPPED}_amd64.deb | head -50
 
