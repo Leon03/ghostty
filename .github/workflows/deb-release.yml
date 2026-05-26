@@ -31,15 +31,14 @@ jobs:
           else
             VERSION=${GITHUB_REF#refs/tags/v}
           fi
-          # Add 'v' prefix if not present (for source URL)
-          if [[ ! "$VERSION" =~ ^v ]]; then
-            SOURCE_URL="https://release.files.ghostty.org/v${VERSION}/ghostty-v${VERSION}.tar.gz"
-          else
-            SOURCE_URL="https://release.files.ghostty.org/${VERSION}/ghostty-${VERSION}.tar.gz"
-          fi
+          # Strip 'v' prefix if present (source URL format uses no prefix)
+          VERSION_STRIPPED=${VERSION#v}
+          SOURCE_URL="https://release.files.ghostty.org/${VERSION_STRIPPED}/ghostty-${VERSION_STRIPPED}.tar.gz"
           echo "VERSION=$VERSION"
+          echo "VERSION_STRIPPED=$VERSION_STRIPPED"
           echo "source_url=$SOURCE_URL"
           echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "version_stripped=$VERSION_STRIPPED" >> $GITHUB_OUTPUT
           echo "source_url=$SOURCE_URL" >> $GITHUB_OUTPUT
 
       - name: Install system dependencies
@@ -173,15 +172,15 @@ jobs:
 
       - name: Create DEBIAN control and scripts
         env:
-          GHOSTTY_VERSION: ${{ steps.version.outputs.version }}
+          GHOSTTY_VERSION_STRIPPED: ${{ steps.version.outputs.version_stripped }}
         run: |
           PKG_ROOT=/tmp/deb-pkg
           mkdir -p $PKG_ROOT/DEBIAN
             
-          # Control file
-          cat > $PKG_ROOT/DEBIAN/control << 'EOF'
+          # Control file (version without 'v' prefix for debian convention)
+          cat > $PKG_ROOT/DEBIAN/control << EOF
 Package: ghostty
-Version: VERSION_PLACEHOLDER
+Version: ${GHOSTTY_VERSION_STRIPPED}
 Section: utils
 Priority: optional
 Architecture: amd64
@@ -194,8 +193,6 @@ Description: A fast, feature-rich, and cross-platform terminal emulator
 Homepage: https://ghostty.org
 Depends: libc6, libglib2.0-0, libgtk-4-1, libpango-1.0-0, libcairo2, libx11-6, libxkbcommon0, libadwaita-1-0, libfreetype6, zlib1g
 EOF
-
-          sed -i "s/VERSION_PLACEHOLDER/$GHOSTTY_VERSION/" $PKG_ROOT/DEBIAN/control
             
           # Pre-install script
           cat > $PKG_ROOT/DEBIAN/preinst << 'PRSCRIPT'
@@ -245,36 +242,39 @@ PRSCRIPT
       - name: Build .deb package
         env:
           GHOSTTY_VERSION: ${{ steps.version.outputs.version }}
+          GHOSTTY_VERSION_STRIPPED: ${{ steps.version.outputs.version_stripped }}
         run: |
           cd /tmp
-          dpkg-deb --build deb-pkg ghostty_${GHOSTTY_VERSION}_amd64.deb
-          ls -la ghostty_${GHOSTTY_VERSION}_amd64.deb
+          dpkg-deb --build deb-pkg ghostty_${GHOSTTY_VERSION_STRIPPED}_amd64.deb
+          # Copy to workspace root for release action access
+          cp ghostty_${GHOSTTY_VERSION_STRIPPED}_amd64.deb $GITHUB_WORKSPACE/
+          ls -la $GITHUB_WORKSPACE/ghostty_${GHOSTTY_VERSION_STRIPPED}_amd64.deb
           
           echo "=== Package contents (first 50 files) ==="
-          dpkg-deb --contents ghostty_${GHOSTTY_VERSION}_amd64.deb | head -50
+          dpkg-deb --contents ghostty_${GHOSTTY_VERSION_STRIPPED}_amd64.deb | head -50
 
       - name: Verify package
         env:
-          GHOSTTY_VERSION: ${{ steps.version.outputs.version }}
+          GHOSTTY_VERSION_STRIPPED: ${{ steps.version.outputs.version_stripped }}
         run: |
           echo "=== Package info ==="
-          dpkg-deb --info /tmp/ghostty_${GHOSTTY_VERSION}_amd64.deb
+          dpkg-deb --info /tmp/ghostty_${GHOSTTY_VERSION_STRIPPED}_amd64.deb
           echo ""
           echo "=== Package size ==="
-          du -h /tmp/ghostty_${GHOSTTY_VERSION}_amd64.deb
+          du -h /tmp/ghostty_${GHOSTTY_VERSION_STRIPPED}_amd64.deb
 
       - name: Upload .deb as release asset
         uses: softprops/action-gh-release@v2
         if: startsWith(github.ref, 'refs/tags/v')
         with:
           files: |
-            /tmp/ghostty_*.deb
+            ghostty_${{ steps.version.outputs.version_stripped }}_amd64.deb
           generate_release_notes: false
           draft: false
 
       - name: Upload .deb as artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ghostty-deb-${{ steps.version.outputs.version }}
-          path: /tmp/ghostty_*.deb
+          name: ghostty-deb-${{ steps.version.outputs.version_stripped }}
+          path: ghostty_${{ steps.version.outputs.version_stripped }}_amd64.deb
           retention-days: 30
