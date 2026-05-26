@@ -70,10 +70,10 @@ jobs:
 
       - name: Install Zig
         run: |
-          # Download Zig compiler (insecure due to potential SSL issues in container)
-          curl -L --insecure -o /tmp/zig.tar.xz "https://ziglang.org/download/${ZIG_VERSION}/zig-linux-x86_64-${ZIG_VERSION}.tar.xz"
+          # Download Zig compiler pre-built binary (URL format changed in 0.15+)
+          curl -L --insecure -o /tmp/zig.tar.xz "https://ziglang.org/download/${ZIG_VERSION}/zig-x86_64-linux-${ZIG_VERSION}.tar.xz"
           tar xJf /tmp/zig.tar.xz -C /opt
-          ln -sf /opt/zig-linux-x86_64-${ZIG_VERSION}/zig /usr/local/bin/zig
+          ln -sf /opt/zig-x86_64-linux-${ZIG_VERSION}/zig /usr/local/bin/zig
           zig version
 
       - name: Download source tarball
