@@ -178,9 +178,11 @@ jobs:
           mkdir -p $PKG_ROOT/DEBIAN
             
           # Control file (version without 'v' prefix for debian convention)
-          cat > $PKG_ROOT/DEBIAN/control << EOF
+          # Using <<-'EOF' to prevent shell expansion so YAML parses correctly,
+          # the env var will be expanded when the script runs
+          cat > $PKG_ROOT/DEBIAN/control <<-'OUTER_EOF'
 Package: ghostty
-Version: ${GHOSTTY_VERSION_STRIPPED}
+Version: VERSION_PLACEHOLDER
 Section: utils
 Priority: optional
 Architecture: amd64
@@ -192,7 +194,9 @@ Description: A fast, feature-rich, and cross-platform terminal emulator
  features, or native UIs. Ghostty provides all three.
 Homepage: https://ghostty.org
 Depends: libc6, libglib2.0-0, libgtk-4-1, libpango-1.0-0, libcairo2, libx11-6, libxkbcommon0, libadwaita-1-0, libfreetype6, zlib1g
-EOF
+OUTER_EOF
+          # Replace placeholder with actual version
+          sed -i 's/VERSION_PLACEHOLDER/'"${GHOSTTY_VERSION_STRIPPED}"'/' $PKG_ROOT/DEBIAN/control
             
           # Pre-install script
           cat > $PKG_ROOT/DEBIAN/preinst << 'PRSCRIPT'
