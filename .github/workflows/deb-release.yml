@@ -32,8 +32,13 @@ jobs:
       - name: Determine version
         id: version
         run: |
-          if [[ "${{ github.event_name }}" == "workflow_dispatch" && -n "${{ inputs.version }}" ]]; then
-            VERSION="${{ inputs.version }}"
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            if [[ -n "${{ inputs.version }}" ]]; then
+              VERSION="${{ inputs.version }}"
+            else
+              # Extract version from build.zig.zon
+              VERSION=$(grep '^\s*\.version\s*=' build.zig.zon | sed 's/.*"\(.*\)".*/\1/')
+            fi
           else
             VERSION="${GITHUB_REF#refs/tags/v}"
           fi
@@ -76,15 +81,14 @@ jobs:
 
       - name: Build ghostty
         env:
-          GHOSTTY_VERSION: ${{ steps.version.outputs.version }}
           GHOSTTY_VERSION_STRIPPED: ${{ steps.version.outputs.version_stripped }}
-          ZIG_LOCAL_CACHE_DIR: /tmp/zig-cache
-          ZIG_GLOBAL_CACHE_DIR: /tmp/zig-global-cache
+          ZIG_CACHE_DIR: /tmp/zig-cache
+          ZIG_GLOBAL_CACHE_DIR: /tmp/zig-cache
         run: |
           DESTDIR=/tmp/ghostty-install \
             zig build \
             --prefix /usr \
-            --system /tmp/zig-cache \
+            --cache-dir /tmp/zig-cache \
             -Doptimize=ReleaseFast \
             -Dcpu=baseline \
             -Dversion-string=${GHOSTTY_VERSION_STRIPPED}
